@@ -1,26 +1,24 @@
-[README.md](https://github.com/user-attachments/files/25391839/README.md)
-# aes256-cli (CLI Encryption Tool)
+[Uploading README.md…]()
+# aes256-cli
 
-> **File:** `cli.py`  
-> **What it does:** Encrypt/Decrypt **text** and **files** using AES-256-GCM (password mode) and optional RSA PEM (public/private) hybrid mode.
+CLI tool for encrypting/decrypting **text** and **files** using:
+
+- **Password mode:** AES-256-GCM + **scrypt** (default)
+- **PEM mode (Hybrid RSA+AES):** RSA-OAEP wraps an AES session key + AES-256-GCM for data
+
+It supports both **Base64 token** output (easy to paste/share) and **raw binary payload** output (`--raw`, faster + smaller).
 
 ---
 
 ## ภาษาไทย
 
-### ภาพรวม
-`cli.py` เป็นเครื่องมือแบบ Command Line (CLI) สำหรับ **เข้ารหัส/ถอดรหัส**
-- **ข้อความ (Text)**: ได้ผลลัพธ์เป็น token แบบ Base64 URL-safe (ส่งทางแชทได้)
-- **ไฟล์ (File)**: เข้ารหัสแล้วเขียนเป็นไฟล์ผลลัพธ์
-
-รองรับ 2 โหมดหลัก:
-1) **Password-based (AES-256-GCM + scrypt)** — เหมาะกับการใช้กันเองแบบ “แชร์รหัสผ่านร่วมกัน”
-2) **Public/Private key (RSA PEM + AES-256-GCM)** — ไม่ต้องแชร์รหัสผ่าน ใช้ public key ของผู้รับเข้ารหัส และใช้ private key ของผู้รับถอดรหัส (Hybrid encryption)
-
----
+### คุณสมบัติ
+- เข้ารหัส/ถอดรหัส **ข้อความ (text)** → ได้ token แบบ Base64 URL-safe
+- เข้ารหัส/ถอดรหัส **ไฟล์ (file)**
+- โหมดรหัสผ่าน (แนะนำสำหรับใช้กันเองแบบแชร์รหัส)
+- โหมด Public/Private key ผ่านไฟล์ `.pem` (ไม่ต้องแชร์รหัสผ่าน)
 
 ### ติดตั้ง
-ต้องมี Python 3.x และติดตั้งไลบรารี:
 ```bash
 pip install cryptography
 ```
@@ -32,109 +30,115 @@ python cli.py help
 
 ---
 
-## โหมด A: Password-based (แชร์รหัสผ่าน)
+## โหมด A: Password-based (AES-256-GCM + scrypt)
 
-### 1) เข้ารหัส “ข้อความ”
+### เข้ารหัสข้อความ
 ```bash
 python cli.py encrypt-text -t "hello world" -p "your-strong-password"
-```
-
-อ่านรหัสผ่านจากไฟล์ (ไฟล์ .txt มี 1 บรรทัด):
-```bash
 python cli.py encrypt-text -t "hello world" -p password.txt
 ```
 
-### 2) ถอดรหัส “ข้อความ”
+### ถอดรหัสข้อความ
 ```bash
 python cli.py decrypt-text -t "<TOKEN>" -p "your-strong-password"
+python cli.py decrypt-text -t "<TOKEN>" -p password.txt
 ```
 
-### 3) เข้ารหัส “ไฟล์”
-> หมายเหตุ: ในโค้ดนี้คำสั่ง `encrypt-file` ถูกล็อคให้รับเฉพาะไฟล์ `.txt`
+### เข้ารหัสไฟล์ (**รับเฉพาะ .txt**)
+> โหมดนี้ถูกตั้งใจให้ใช้กับข้อความ/ไฟล์ข้อความเท่านั้น จึงล็อค input เป็น `.txt`
 ```bash
-python cli.py encrypt-file -i notes.txt -p "your-strong-password"
-# output เริ่มต้น: notes.aes (เป็นไฟล์ข้อความที่เก็บ token)
+python cli.py encrypt-file -i notes.txt -p password.txt
+# default output: notes.aes  (ไฟล์ข้อความที่เก็บ token)
 ```
 
-### 4) ถอดรหัส “ไฟล์”
+### เข้ารหัสไฟล์แบบ raw (`--raw`) → **ต้องเป็น .aesbin**
+- ข้อดี: ไฟล์เล็กกว่า (ไม่บวมจาก base64) และเร็วกว่า
+- กติกา: ถ้าใช้ `--raw` แล้วใส่ `-o` ต้องลงท้ายด้วย `.aesbin` เสมอ
 ```bash
-python cli.py decrypt-file -i notes.aes -o notes.dec.txt -p "your-strong-password"
+python cli.py encrypt-file -i notes.txt -p password.txt --raw -o notes.aesbin
+# ถ้าไม่ใส่ -o: default เป็น notes.aesbin
+```
+
+### ถอดรหัสไฟล์ → **บังคับ output เป็น .txt**
+- ถ้าใส่ `-o` แต่ไม่ใช่ `.txt` ระบบจะปรับเป็น `.txt` ให้เอง
+```bash
+python cli.py decrypt-file -i notes.aes -p password.txt -o notes.dec.txt
+```
+
+### ถอดรหัสไฟล์ raw
+- ใส่ `--raw` หรือให้ไฟล์ input ลงท้าย `.aesbin` (auto-detect)
+```bash
+python cli.py decrypt-file -i notes.aesbin -p password.txt -o notes.dec.txt
+# หรือ
+python cli.py decrypt-file -i notes.aesbin --raw -p password.txt -o notes.dec.txt
 ```
 
 ---
 
-## โหมด B: Public/Private key (RSA PEM) — ไม่ต้องแชร์รหัสผ่าน
+## โหมด B: PEM (Hybrid RSA+AES) — ไม่ต้องแชร์รหัสผ่าน
 
-### 1) สร้างคู่คีย์
+### 1) สร้าง keypair
 ```bash
 python cli.py generate-keypair --private-out private_key.pem --public-out public_key.pem
 ```
 
-ตัวเลือกสำคัญ:
+ตัวเลือกที่ใช้บ่อย:
 ```bash
-# เลือกขนาดคีย์
-python cli.py generate-keypair --private-out private_key.pem --public-out public_key.pem --bits 4096
-
-# เข้ารหัส private key (แนะนำ)
-python cli.py generate-keypair --private-out private_key.pem --public-out public_key.pem --encrypt-private
-
-# หรือส่งรหัสผ่านให้ private key
-python cli.py generate-keypair --private-out private_key.pem --public-out public_key.pem --private-pass "mypw"
-python cli.py generate-keypair --private-out private_key.pem --public-out public_key.pem --private-pass pass.txt
+python cli.py generate-keypair --bits 4096 --private-out private_key.pem --public-out public_key.pem
+python cli.py generate-keypair --encrypt-private --private-out private_key.pem --public-out public_key.pem
+python cli.py generate-keypair --private-pass "mypw" --private-out private_key.pem --public-out public_key.pem
+python cli.py generate-keypair --private-pass pass.txt --private-out private_key.pem --public-out public_key.pem
 ```
 
-### 2) เข้ารหัส “ข้อความ” ด้วย public key ของผู้รับ
+> หมายเหตุ: โค้ดจะเติม timestamp ต่อท้ายชื่อไฟล์เสมอ (เช่น `_18022026_204148`)
+
+### 2) เข้ารหัส/ถอดรหัส “ข้อความ” ด้วย .pem
 ```bash
 python cli.py encrypt-text-pem -t "hello" --public-key friend_public.pem
-```
-
-### 3) ถอดรหัส “ข้อความ” ด้วย private key ของตัวเอง
-```bash
 python cli.py decrypt-text-pem -t "<TOKEN>" --private-key my_private.pem
-# ถ้า private key ถูกเข้ารหัสไว้:
 python cli.py decrypt-text-pem -t "<TOKEN>" --private-key my_private.pem --private-pass "mypw"
 ```
 
-### 4) เข้ารหัส “ไฟล์” ด้วย public key ของผู้รับ
+### 3) เข้ารหัส/ถอดรหัส “ไฟล์” ด้วย .pem (token mode)
 ```bash
 python cli.py encrypt-file-pem -i notes.txt --public-key friend_public.pem
-# output เริ่มต้น: notes_pem.aes
+# default output: notes_pem.aes
+
+python cli.py decrypt-file-pem -i notes_pem.aes --private-key my_private.pem -o notes.dec.txt
 ```
 
-### 5) ถอดรหัส “ไฟล์” ด้วย private key ของตัวเอง
+### 4) PEM file mode แบบ raw (`--raw`) → **ต้องเป็น .aesbin**
 ```bash
-python cli.py decrypt-file-pem -i notes_pem.aes --private-key my_private.pem -o notes.dec.txt
+python cli.py encrypt-file-pem -i notes.txt --public-key friend_public.pem --raw -o notes_pem.aesbin
+python cli.py decrypt-file-pem -i notes_pem.aesbin --private-key my_private.pem --raw -o notes.dec.txt
 ```
 
 ---
 
-## โหมด Interactive (พิมพ์คำสั่งทีละบรรทัด)
-ถ้ารันโดยไม่ใส่อาร์กิวเมนต์ จะเข้าโหมด interactive:
+## โหมด Interactive
+ถ้ารันโดยไม่ใส่อาร์กิวเมนต์ จะเข้า interactive shell:
 ```bash
 python cli.py
 ```
-แล้วพิมพ์คำสั่ง เช่น:
-```
-encrypt-text -t "hello" -p password.txt
-```
+
+---
+
+## หมายเหตุด้านความปลอดภัย
+- Token เป็น Base64 เพื่อความสะดวกในการส่ง ไม่ใช่ “obfuscation”
+- AES-GCM มีการตรวจจับการแก้ไขข้อมูล (tamper detection)
+- ถ้า decrypt แล้วขึ้นแนว ๆ “wrong password/key or corrupted data” แปลว่า **รหัส/คีย์ผิด หรือข้อมูลถูกแก้/เสียหาย**
 
 ---
 
 ## English
 
-### Overview
-`cli.py` is a command-line tool to **encrypt/decrypt**
-- **Text**: outputs a URL-safe Base64 token (easy to share)
-- **Files**: writes the encrypted token to an output file
+## Features
+- Encrypt/decrypt **text** → URL-safe Base64 token
+- Encrypt/decrypt **files**
+- **Password mode:** AES-256-GCM + scrypt (default)
+- **PEM mode:** Hybrid RSA-OAEP + AES-256-GCM (no shared password)
 
-Two modes:
-1) **Password-based (AES-256-GCM + scrypt)** — share a password
-2) **Public/Private key (RSA PEM + AES-256-GCM)** — hybrid encryption using the recipient’s public key and the recipient’s private key for decryption
-
----
-
-### Installation
-Requires Python 3.x and:
+## Install
 ```bash
 pip install cryptography
 ```
@@ -151,82 +155,72 @@ python cli.py help
 ### Encrypt text
 ```bash
 python cli.py encrypt-text -t "hello world" -p "your-strong-password"
-```
-
-Read password from file (single-line `.txt`):
-```bash
 python cli.py encrypt-text -t "hello world" -p password.txt
 ```
 
 ### Decrypt text
 ```bash
 python cli.py decrypt-text -t "<TOKEN>" -p "your-strong-password"
+python cli.py decrypt-text -t "<TOKEN>" -p password.txt
 ```
 
-### Encrypt file
-> Note: `encrypt-file` is restricted to `.txt` files in this codebase.
+### Encrypt file (**.txt only**)
 ```bash
-python cli.py encrypt-file -i notes.txt -p "your-strong-password"
-# default output: notes.aes
+python cli.py encrypt-file -i notes.txt -p password.txt
+# default output: notes.aes (a text file storing the base64 token)
 ```
 
-### Decrypt file
+### Encrypt file as raw (`--raw`) → **output must be .aesbin**
 ```bash
-python cli.py decrypt-file -i notes.aes -o notes.dec.txt -p "your-strong-password"
+python cli.py encrypt-file -i notes.txt -p password.txt --raw -o notes.aesbin
+# if -o is omitted: default is notes.aesbin
+```
+
+### Decrypt file → **output is forced to .txt**
+```bash
+python cli.py decrypt-file -i notes.aes -p password.txt -o notes.dec.txt
+```
+
+### Decrypt raw file
+```bash
+python cli.py decrypt-file -i notes.aesbin -p password.txt -o notes.dec.txt
+# or
+python cli.py decrypt-file -i notes.aesbin --raw -p password.txt -o notes.dec.txt
 ```
 
 ---
 
-## Mode B: RSA PEM public/private (no shared password)
+## Mode B: PEM (Hybrid RSA+AES)
 
 ### Generate keypair
 ```bash
 python cli.py generate-keypair --private-out private_key.pem --public-out public_key.pem
 ```
 
-Useful options:
-```bash
-python cli.py generate-keypair --private-out private_key.pem --public-out public_key.pem --bits 4096
-python cli.py generate-keypair --private-out private_key.pem --public-out public_key.pem --encrypt-private
-python cli.py generate-keypair --private-out private_key.pem --public-out public_key.pem --private-pass "mypw"
-python cli.py generate-keypair --private-out private_key.pem --public-out public_key.pem --private-pass pass.txt
-```
-
-### Encrypt text with recipient public key
+### Encrypt/decrypt text with PEM
 ```bash
 python cli.py encrypt-text-pem -t "hello" --public-key friend_public.pem
-```
-
-### Decrypt text with your private key
-```bash
 python cli.py decrypt-text-pem -t "<TOKEN>" --private-key my_private.pem
 python cli.py decrypt-text-pem -t "<TOKEN>" --private-key my_private.pem --private-pass "mypw"
 ```
 
-### Encrypt file with recipient public key
+### Encrypt/decrypt file with PEM (token mode)
 ```bash
 python cli.py encrypt-file-pem -i notes.txt --public-key friend_public.pem
-# default output: notes_pem.aes
-```
+# default: notes_pem.aes
 
-### Decrypt file with your private key
-```bash
 python cli.py decrypt-file-pem -i notes_pem.aes --private-key my_private.pem -o notes.dec.txt
 ```
 
----
-
-## Interactive mode
-Run without arguments:
+### PEM raw (`--raw`) → **output must be .aesbin**
 ```bash
-python cli.py
+python cli.py encrypt-file-pem -i notes.txt --public-key friend_public.pem --raw -o notes_pem.aesbin
+python cli.py decrypt-file-pem -i notes_pem.aesbin --private-key my_private.pem --raw -o notes.dec.txt
 ```
-Then type commands line by line.
 
 ---
 
-## Security notes (quick)
-- The token is Base64 for transport—it’s not “security by obfuscation”.
+## Quick security notes
+- Base64 tokens are for transport convenience, not obfuscation.
 - AES-GCM provides confidentiality + integrity (tamper detection).
-- Never share your private key. Prefer encrypting private keys (`--encrypt-private`).
-
+- If decryption fails, it usually means the password/key is wrong or the data is corrupted.
