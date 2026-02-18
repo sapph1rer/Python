@@ -44,23 +44,35 @@ BANNER = r"""
 """
 
 
-HELP_EXAMPLES = """
-Examples:
+HELP_EXAMPLES = r"""Examples:
   help
   generate-keypair
   encrypt-text -t "hello world" -p "your-strong-password"
   encrypt-text -t "hello world" -p password.txt
   decrypt-text -t "<TOKEN>" -p "your-strong-password"
   decrypt-text -t "<TOKEN>" -p password.txt
+
+  # Public/Private key (RSA PEM) mode
   encrypt-text-pem -t "hello world" --public-key public_key.pem
   decrypt-text-pem -t "<TOKEN>" --private-key private_key.pem
+
+  # Password-based file mode (.txt only)
   encrypt-file -i notes.txt -p "your-strong-password"
   encrypt-file -i notes.txt -p password.txt
   decrypt-file -i notes.aes -o notes.dec.txt -p "your-strong-password"
   decrypt-file -i notes.aes -o notes.dec.txt -p password.txt
+
+  # Password-based file mode (raw binary payload)
+  encrypt-file -i notes.txt -p password.txt --raw -o notes.aesbin
+  decrypt-file -i notes.aesbin -p password.txt -o notes.dec.txt
+
+  # PEM file mode (hybrid RSA+AES)
   encrypt-file-pem -i notes.txt --public-key public_key.pem
   decrypt-file-pem -i notes_pem.aes --private-key private_key.pem -o notes.dec.txt
-"""
+
+  # PEM file mode (raw binary payload)
+  encrypt-file-pem -i notes.txt --public-key public_key.pem --raw -o notes_pem.aesbin
+  decrypt-file-pem -i notes_pem.aesbin --private-key private_key.pem --raw -o notes.dec.txt"""
 
 
 def print_banner():
@@ -583,12 +595,25 @@ def encrypt_file_flow(args):
     if input_path.suffix.lower() != ".txt":
         raise ValueError("Only .txt files are allowed for file encryption.")
 
-    output_path = Path(args.output).resolve() if args.output else input_path.with_name(f"{input_path.stem}.aes")
+    # default outputs:
+    # - token mode: <stem>.aes (text file storing base64 token)
+    # - raw mode:   <stem>.aesbin (binary payload)
+    if args.output:
+        output_path = Path(args.output).resolve()
+        if args.raw and output_path.suffix.lower() != ".aesbin":
+            raise ValueError("When using --raw, output file must have a .aesbin extension.")
+    else:
+        output_path = input_path.with_name(f"{input_path.stem}.aesbin" if args.raw else f"{input_path.stem}.aes")
+
     password = get_password(args.password, confirm=True)
 
     content = input_path.read_bytes()
     encrypted = encrypt_bytes(content, password)
-    output_path.write_text(encode_payload(encrypted), encoding="utf-8")
+
+    if args.raw:
+        output_path.write_bytes(encrypted)
+    else:
+        output_path.write_text(encode_payload(encrypted), encoding="utf-8")
 
     print(f"\n[OK] Encrypted file saved: {output_path}")
 
@@ -598,13 +623,32 @@ def decrypt_file_flow(args):
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
-    output_path = Path(args.output).resolve() if args.output else Path(str(input_path) + ".decrypted.txt")
+    # Force output to be a .txt file (because encrypt-file only allows .txt inputs).
+    if args.output:
+        output_path = Path(args.output).resolve()
+        if output_path.suffix.lower() != ".txt":
+            output_path = output_path.with_suffix(".txt") if output_path.suffix else Path(str(output_path) + ".txt")
+    else:
+        output_path = Path(str(input_path) + ".decrypted.txt")
+
     password = get_password(args.password, confirm=False)
 
-    token = input_path.read_text(encoding="utf-8").strip()
-    payload = decode_payload(token)
+    # Raw input is supported via --raw or by using the .aesbin extension.
+    raw_in = bool(getattr(args, "raw", False)) or input_path.suffix.lower() == ".aesbin"
+    if raw_in:
+        payload = input_path.read_bytes()
+    else:
+        token = input_path.read_text(encoding="utf-8").strip()
+        payload = decode_payload(token)
+
     plaintext = decrypt_bytes(payload, password)
-    output_path.write_bytes(plaintext)
+
+    try:
+        text_out = plaintext.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("Decrypted content is not valid UTF-8 text.") from exc
+
+    output_path.write_text(text_out, encoding="utf-8")
 
     print(f"\n[OK] Decrypted file saved: {output_path}")
 
@@ -616,14 +660,29 @@ def encrypt_file_pem_flow(args):
     if not input_path.is_file():
         raise ValueError(f"Input path is not a file: {input_path}")
 
-    output_path = Path(args.output).resolve() if args.output else input_path.with_name(f"{input_path.stem}_pem.aes")
     public_key = load_public_key_pem(args.public_key)
+
+    # Output rules:
+    # - default: *_pem.aes (token/base64 text)
+    # - with --raw: *_pem.aesbin (raw binary payload)
+    if args.raw:
+        default_out = input_path.with_name(f"{input_path.stem}_pem.aesbin")
+        output_path = Path(args.output).resolve() if args.output else default_out
+        if output_path.suffix.lower() != ".aesbin":
+            raise ValueError("When using --raw, output file must have a .aesbin extension.")
+    else:
+        default_out = input_path.with_name(f"{input_path.stem}_pem.aes")
+        output_path = Path(args.output).resolve() if args.output else default_out
 
     content = input_path.read_bytes()
     encrypted = encrypt_bytes_v4(content, public_key)
-    output_path.write_text(encode_payload(encrypted), encoding="utf-8")
 
-    print(f"\n[OK] Encrypted file saved: {output_path}")
+    if args.raw:
+        output_path.write_bytes(encrypted)
+    else:
+        output_path.write_text(encode_payload(encrypted), encoding="utf-8")
+
+    print(f"[OK] Encrypted file saved: {output_path}")
 
 
 def decrypt_file_pem_flow(args):
@@ -636,12 +695,18 @@ def decrypt_file_pem_flow(args):
     output_path = Path(args.output).resolve() if args.output else Path(str(input_path) + ".decrypted")
     private_key = load_private_key_pem(args.private_key, args.private_pass)
 
-    token = input_path.read_text(encoding="utf-8").strip()
-    payload = decode_payload(token)
+    is_raw = bool(args.raw) or input_path.suffix.lower() == ".aesbin"
+
+    if is_raw:
+        payload = input_path.read_bytes()
+    else:
+        token = input_path.read_text(encoding="utf-8").strip()
+        payload = decode_payload(token)
+
     plaintext = decrypt_bytes_v4(payload, private_key)
     output_path.write_bytes(plaintext)
 
-    print(f"\n[OK] Decrypted file saved: {output_path}")
+    print(f"[OK] Decrypted file saved: {output_path}")
 
 
 def build_parser():
@@ -671,13 +736,15 @@ def build_parser():
 
     p_enc_file = subparsers.add_parser("encrypt-file", help="Encrypt a .txt file")
     p_enc_file.add_argument("-i", "--input", required=True, help="Input .txt file path")
-    p_enc_file.add_argument("-o", "--output", help="Output encrypted file path (default: input.aes)")
+    p_enc_file.add_argument("-o", "--output", help="Output encrypted file path (default: <stem>.aes or <stem>.aesbin when --raw)")
+    p_enc_file.add_argument("--raw", action="store_true", help="Write raw binary payload instead of a base64 token file")
     p_enc_file.add_argument("-p", "--password", help=password_help)
     p_enc_file.set_defaults(func=encrypt_file_flow)
 
     p_dec_file = subparsers.add_parser("decrypt-file", help="Decrypt an encrypted file")
     p_dec_file.add_argument("-i", "--input", required=True, help="Input encrypted file path")
-    p_dec_file.add_argument("-o", "--output", help="Output decrypted file path (default: input.aes.decrypted.txt)")
+    p_dec_file.add_argument("-o", "--output", help="Output decrypted .txt file path (forced to .txt; default: input.decrypted.txt)")
+    p_dec_file.add_argument("--raw", action="store_true", help="Read raw binary payload (or use .aesbin extension)")
     p_dec_file.add_argument("-p", "--password", help=password_help)
     p_dec_file.set_defaults(func=decrypt_file_flow)
 
@@ -718,8 +785,9 @@ def build_parser():
 
     p_enc_file_pem = subparsers.add_parser("encrypt-file-pem", help="Encrypt a file with RSA public key (.pem)")
     p_enc_file_pem.add_argument("-i", "--input", required=True, help="Input file path")
-    p_enc_file_pem.add_argument("-o", "--output", help="Output encrypted file path (default: input_pem.aes)")
+    p_enc_file_pem.add_argument("-o", "--output", help="Output encrypted file path (default: *_pem.aes, or *_pem.aesbin with --raw)")
     p_enc_file_pem.add_argument("--public-key", required=True, help="Public key PEM path")
+    p_enc_file_pem.add_argument("--raw", action="store_true", help="Write raw binary payload (.aesbin) instead of a base64 token file")
     p_enc_file_pem.set_defaults(func=encrypt_file_pem_flow)
 
     p_dec_file_pem = subparsers.add_parser("decrypt-file-pem", help="Decrypt a file with RSA private key (.pem)")
@@ -727,6 +795,7 @@ def build_parser():
     p_dec_file_pem.add_argument("-o", "--output", help="Output decrypted file path")
     p_dec_file_pem.add_argument("--private-key", required=True, help="Private key PEM path")
     p_dec_file_pem.add_argument("--private-pass", help=private_key_pass_help)
+    p_dec_file_pem.add_argument("--raw", action="store_true", help="Read raw binary payload (.aesbin). Auto-detected by .aesbin extension.")
     p_dec_file_pem.set_defaults(func=decrypt_file_pem_flow)
 
     return parser
@@ -773,9 +842,23 @@ def interactive_shell(parser: argparse.ArgumentParser) -> None:
             print("[EXIT] End of input.")
             break
         except ValueError as exc:
-            last_result = f"[ERROR] {exc}"
+            last_result = f"[ERROR] {format_error(exc)}"
         except Exception as exc:
-            last_result = f"[ERROR] {exc}"
+            last_result = f"[ERROR] {format_error(exc)}"
+
+
+
+def format_error(exc: Exception) -> str:
+    # Provide user-friendly, non-leaky messages for common failures.
+    if isinstance(exc, InvalidTag):
+        return "Authentication failed: wrong password/key or the data is corrupted."
+    if isinstance(exc, FileNotFoundError):
+        return str(exc)
+    if isinstance(exc, PermissionError):
+        return f"Permission denied: {exc}"
+    if isinstance(exc, ValueError):
+        return str(exc)
+    return str(exc)
 
 
 def main():
@@ -784,7 +867,7 @@ def main():
         try:
             run_command(parser, sys.argv[1:], interactive=False)
         except Exception as exc:
-            print(f"\n[ERROR] {exc}", file=sys.stderr)
+            print(f"\n[ERROR] {format_error(exc)}", file=sys.stderr)
             sys.exit(1)
     else:
         interactive_shell(parser)
